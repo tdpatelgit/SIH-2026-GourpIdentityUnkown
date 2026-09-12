@@ -34,6 +34,7 @@ Scoping estimate (functional-prototype tier, not built now): `.hermes/plans/2026
 | 17. Manual field correction by reviewer | ✅ Done — `/review/[id]` "Edit fields" lets a reviewer correct AI-misread values in place instead of only approve/reject, 38/38 tests passing, verified live via real API round-trip |
 | 18. Real TrOCR merged to main + per-upload AI toggle | ✅ Done — TrOCR branch merged into `main`; upload page has a "📋 Saved responses" / "🤖 AI review (TrOCR)" toggle per upload, 55/55 tests passing, verified live end-to-end with both modes through the real API |
 | 19. Dummy plot uploads also run through real AI when toggled | ✅ Done — `backend/dummy_scans/` per-line demo images, dummy-upload endpoint honors the same toggle, verified live for all 4 plots via real TrOCR |
+| 20. TrOCR accuracy improvements | ✅ Done — beam search + no-repeat-ngram decoding, 2x upscale, dropped harmful contrast normalization; field-extraction accuracy went from missing "Area" on every plot to 22/24 (92%) lines correct across all 4 dummy plots, verified live |
 
 **Live verification performed this session:**
 - `pytest` in `backend/`: **5 passed**
@@ -208,6 +209,34 @@ field was misread by TrOCR itself as "APRA" on one plot (a genuine model
 limitation, not a mapper bug) and correctly fell through to no match for
 that one field — exactly the kind of imperfection the reviewer/correction
 workflow exists to catch.
+
+### TrOCR Accuracy Improvements
+
+The "Area" field being consistently missed above prompted a real
+accuracy pass, not just accepting the limitation. Three changes, each
+verified via real A/B testing (not assumed):
+
+1. **Beam search decoding** (`num_beams=5`) instead of greedy decoding,
+   plus `no_repeat_ngram_size=3` to curb TrOCR's tendency to hallucinate
+   repeated trailing words on short lines (e.g. `"MUTATION: PENDING
+   RECEIPT FOR RECEIPT"`).
+2. **2x upscaling** (Lanczos) of the preprocessed image before OCR —
+   TrOCR reads small/tight single-line crops noticeably better at 2x
+   size; confirmed via direct A/B (`'APEA: 2.35'` → `'AREA: 2.35'`).
+3. **Removed histogram equalization** from preprocessing entirely — real
+   testing showed it was actively *hurting* accuracy on already-legible
+   text (introduced the exact "AREA"→"APEA"/"APRA" misread and a
+   `"SURVEY NO:9-C CASHIER"` hallucination that vanished once removed).
+   Deskew + denoise + upscale is the new pipeline.
+
+**Before/after on the same 24 dummy-plot text lines**, measured
+end-to-end via the real running API: the "Area" field was missing from
+*every* plot before this change; after, **22/24 lines (92%) correctly
+extracted**, including "Area" on 3 of 4 plots. The 2 remaining misses
+are genuine model limitations on fine OCR distinctions (`APEA` vs `AREA`,
+`AMITRA` vs `ANITHA`) — exactly the class of error the reviewer
+correction workflow is designed to catch, not something further prompt
+engineering on a fixed base model can fully eliminate.
 
 ## Reject + Admin Blacklist Review
 

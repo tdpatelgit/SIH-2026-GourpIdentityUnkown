@@ -78,7 +78,17 @@ def run_ocr(image_bytes: bytes) -> str:
     pixel_values = _processor(images=image, return_tensors="pt").pixel_values
 
     with torch.no_grad():
-        generated_ids = _model.generate(pixel_values, max_length=64)
+        # Beam search (vs. greedy decoding) meaningfully improves accuracy
+        # for TrOCR — it explores multiple candidate sequences instead of
+        # committing to the single highest-probability token at each step,
+        # which is where greedy decoding goes wrong on ambiguous glyphs.
+        generated_ids = _model.generate(
+            pixel_values,
+            max_length=64,
+            num_beams=5,
+            no_repeat_ngram_size=3,
+            early_stopping=True,
+        )
 
     text = _processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
     return text.strip()
