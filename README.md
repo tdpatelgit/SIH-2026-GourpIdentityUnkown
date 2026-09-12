@@ -253,22 +253,22 @@ Full contract details in the plan doc above.
 ## Running locally
 
 ```bash
-# backend (port 8000)
+# backend (port 8067)
 cd backend
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
+uvicorn main:app --reload --host 0.0.0.0 --port 8067
 
 # run backend tests
 pytest -v
 
-# frontend (port 3000)
+# frontend (port 3067)
 cd frontend
 npm install
-npm run dev
+npm run build && npm run start -- -H 0.0.0.0 -p 3067
 ```
 
-Open `http://localhost:3000`, upload any image file, watch the ~1.2–2.5s
+Open `http://localhost:3067`, upload any image file, watch the ~1.2–2.5s
 processing state, then see 6 extracted fields with confidence badges.
 
 ## What's deliberately NOT built (out of scope for this tier)
