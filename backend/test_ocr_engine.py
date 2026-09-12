@@ -51,3 +51,24 @@ def test_run_ocr_raises_when_model_unavailable(monkeypatch):
         assert False, "expected RuntimeError"
     except RuntimeError as exc:
         assert "not available" in str(exc)
+
+
+def test_run_ocr_and_map_fields_maps_recognized_text(monkeypatch):
+    monkeypatch.setattr(ocr_module, "run_ocr", lambda image_bytes: "Owner Name: Test Person")
+    fields = ocr_module.run_ocr_and_map_fields(b"fake-bytes")
+    assert fields == [
+        {
+            "name": "owner_name",
+            "label": "Owner Name",
+            "value": "Test Person",
+            "confidence": 0.55,
+        }
+    ]
+
+
+def test_run_ocr_and_map_fields_falls_back_when_unmapped(monkeypatch):
+    monkeypatch.setattr(ocr_module, "run_ocr", lambda image_bytes: "gibberish")
+    fields = ocr_module.run_ocr_and_map_fields(b"fake-bytes")
+    assert len(fields) == 1
+    assert fields[0]["name"] == "raw_ocr_text"
+    assert fields[0]["value"] == "gibberish"

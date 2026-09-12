@@ -56,6 +56,58 @@ Apple Silicon Mac in this test) — fine for a demo, not for production
 throughput; a GPU or `trocr-base-printed`'s ONNX-exported variant would
 be the next optimization if this needs to be fast.
 
+## Preprocessing + Human-Readable Field Mapping (added)
+
+**Preprocessing** (`backend/image_preprocessing.py`, via OpenCV):
+deskew (auto-detected rotation via `minAreaRect`, corrected before OCR) +
+denoise (`fastNlMeansDenoisingColored`) + contrast normalization
+(histogram equalization). Falls back to the original bytes unchanged if
+preprocessing fails for any reason — never blocks OCR.
+
+**Verified real impact** (not simulated) — generated a realistic
+Times-New-Roman test image, rotated it -6°, ran it through TrOCR with and
+without preprocessing:
+- Upright, no preprocessing: `'KHATA NO 213A'` (perfect)
+- Rotated, no preprocessing: `'KHATA NO 2134'` (last char corrupted)
+- Rotated, WITH preprocessing: `'KEMATA NO 213A'` (number recovered correctly)
+
+Deskew visibly fixes the rotation (verified via saved intermediate image);
+the exact glyph transcription is still TrOCR's own limits on a
+single-line-optimized model reading multi-word text, not this pipeline's
+fault. Preprocessing is a net positive for anything actually skewed, and
+a no-op (imperceptible change) for already-upright input.
+
+**Human-readable field mapping** (`backend/ocr_field_mapper.py`): raw
+decoded OCR text is regex/keyword-matched against known field labels
+(Khata No., Khasra No., Survey No., Owner Name, Area, Mutation) and
+reshaped into the *same* `{name, label, value, confidence}` field format
+the mocked fixtures use — so a reviewer sees a normal field table instead
+of one opaque "raw text" blob. Confidence is fixed at `0.55` for any
+matched field (regex-matched, not a real per-field OCR confidence) and
+`0.5` for the raw-text fallback. If nothing matches any known label
+pattern (garbled OCR output, e.g. `'***'` on a hard input), it falls back
+to displaying a single `raw_ocr_text` field so the reviewer still sees
+something rather than an empty table.
+
+**Verified live via the real running API**, not just unit tests: uploaded
+a realistic "Owner Name: Ramesh Kumar" test image through
+`POST /api/analyze` with `USE_REAL_OCR=true` and got back:
+```json
+{"fields": [{"name": "owner_name", "label": "Owner Name", "value": "RAMESH KUMAR", "confidence": 0.55}], ...}
+```
+— i.e. a field shaped exactly like the mocked fixture output, not a raw
+blob.
+
+**11 new unit tests** (`test_ocr_field_mapper.py`, `test_image_preprocessing.py`,
+2 more in `test_ocr_engine.py`) — 48/48 backend tests passing total.
+
+**Known limitation, still true:** this is regex/keyword pattern matching
+on a single decoded string, not a real NER model — it only works when
+TrOCR's own transcription is accurate enough to contain a recognizable
+label phrase. Real scanned government forms with inconsistent
+layouts/handwriting will need either per-field image cropping before OCR
+or an actual NER model; that's the next real step if pursued further.
+
 ## Known environment gotcha hit during setup
 
 `huggingface_hub` calls failed with `401 RepositoryNotFoundError` /

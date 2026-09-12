@@ -74,30 +74,25 @@ async def analyze(
 
     if ocr_engine.is_available():
         # Real OCR path (USE_REAL_OCR=true + model loaded successfully).
-        # TrOCR only recognizes raw text — it does NOT map text to specific
-        # fields (khata_no, owner_name, etc). Field-level NER extraction is
-        # explicitly out of scope for this integration; see README.
+        # Image is deskewed/denoised/contrast-normalized before OCR, then
+        # the raw decoded text is mapped into the same human-readable
+        # field shape as the mocked fixtures (falls back to a single
+        # "Raw OCR Text" field if nothing matched a known label).
         image_bytes = await file.read()
         try:
-            raw_text = ocr_engine.run_ocr(image_bytes)
+            fields = ocr_engine.run_ocr_and_map_fields(image_bytes)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"OCR failed: {exc}")
 
-        fields = [
-            {
-                "name": "raw_ocr_text",
-                "label": "Raw OCR Text (unmapped)",
-                "value": raw_text or "(no text recognized)",
-                "confidence": 0.5,  # TrOCR doesn't expose a calibrated confidence; always flag for review
-            }
-        ]
-        overall_confidence = 0.5
-        review_required = True  # raw OCR output always needs human field-mapping/review
+        overall_confidence = (
+            sum(f["confidence"] for f in fields) / len(fields) if fields else 0.5
+        )
+        review_required = True  # real OCR output always needs human review
         record = db.create_document(
             document_id=document_id,
             filename=file.filename,
             fields=fields,
-            overall_confidence=overall_confidence,
+            overall_confidence=round(overall_confidence, 2),
             review_required=review_required,
             status="pending_review",
             owner_username=owner_username,

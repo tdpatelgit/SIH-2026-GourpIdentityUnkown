@@ -1,16 +1,18 @@
 """Real OCR via TrOCR (microsoft/trocr-base-printed), gated behind USE_REAL_OCR.
 
-This module is intentionally isolated from the mocked fixtures pipeline —
-it does ONE thing: given image bytes, return the raw recognized text.
-Field-level extraction (mapping text -> khata_no/owner_name/etc.) is
-explicitly out of scope here; see README for why.
+Given image bytes: preprocess (deskew/denoise/contrast via
+image_preprocessing.py) -> run TrOCR -> map the raw decoded text into
+human-readable fields (via ocr_field_mapper.py) shaped like the mocked
+fixtures, so the reviewer sees the same kind of field table either way.
 
 Model loads lazily on first call and is cached for the process lifetime —
 loading ~1.3GB of weights on every request would make the demo unusable.
 """
 import io
 import os
-from typing import Optional
+from typing import List, Optional
+
+from ocr_field_mapper import MappedField, build_human_readable_fields
 
 USE_REAL_OCR = os.getenv("USE_REAL_OCR", "false").lower() in ("1", "true", "yes")
 
@@ -46,7 +48,7 @@ def get_load_error() -> Optional[str]:
 
 
 def run_ocr(image_bytes: bytes) -> str:
-    """Run TrOCR on raw image bytes, return the recognized text.
+    """Run TrOCR on preprocessed image bytes, return the recognized text.
 
     Raises RuntimeError if the model isn't available (caller should check
     is_available() first and fall back to mocked fixtures instead).
@@ -58,7 +60,10 @@ def run_ocr(image_bytes: bytes) -> str:
     from PIL import Image
     import torch
 
-    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    from image_preprocessing import preprocess_for_ocr
+
+    preprocessed_bytes = preprocess_for_ocr(image_bytes)
+    image = Image.open(io.BytesIO(preprocessed_bytes)).convert("RGB")
     pixel_values = _processor(images=image, return_tensors="pt").pixel_values
 
     with torch.no_grad():
@@ -66,3 +71,10 @@ def run_ocr(image_bytes: bytes) -> str:
 
     text = _processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
     return text.strip()
+
+
+def run_ocr_and_map_fields(image_bytes: bytes) -> List[MappedField]:
+    """Run OCR and return human-readable fields in the same shape as the
+    mocked fixtures (list of {name, label, value, confidence})."""
+    raw_text = run_ocr(image_bytes)
+    return build_human_readable_fields(raw_text)
