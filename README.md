@@ -31,6 +31,7 @@ Scoping estimate (functional-prototype tier, not built now): `.hermes/plans/2026
 | 14. Uploader accounts (signup/login, "My Documents") | ✅ Done — `/account/login`, `/account`, real password-hashed accounts in SQLite, 24/24 tests passing, verified live end-to-end |
 | 15. Dummy upload for 4 plots + government-record comparison for AI-accuracy review | ✅ Done — one-click dummy uploads, side-by-side AI-vs-government comparison table on the review page, verified live (2 clean matches + 2 deliberate AI errors caught) |
 | 16. Reject + admin blacklist review for bad AI output/uploads | ✅ Done — `/review/[id]` Reject + Flag buttons, `/admin/blacklist` dashboard, 35/35 tests passing, verified live end-to-end (reject + flag→resolve→auto-reject flow) |
+| 17. Manual field correction by reviewer | ✅ Done — `/review/[id]` "Edit fields" lets a reviewer correct AI-misread values in place instead of only approve/reject, 38/38 tests passing, verified live via real API round-trip |
 
 **Live verification performed this session:**
 - `pytest` in `backend/`: **5 passed**
@@ -114,6 +115,30 @@ both outcomes afterward.
 **Known limitation (mocked tier):** login is not real auth — any
 credentials work, session is just a `sessionStorage` flag with no
 server-side validation or token. Fine for a demo, not for production.
+
+## Manual Field Correction by Reviewer
+
+Beyond Approve/Reject/Flag, a reviewer can now directly correct any
+AI-extracted field value on `/review/[id]` via a new "✎ Edit fields"
+button next to the Extracted Fields table — turns the read-only table
+into inline text inputs per field, "Save corrections" persists the
+change and stamps the document `fields_edited_by_reviewer: true` (shown
+as a small badge afterward), "Cancel" discards the edit.
+
+This covers the case where the AI got a field wrong but the document is
+otherwise fine — previously the only options were Approve-as-is (keeping
+the wrong value) or Reject (throwing out an otherwise-correct document).
+
+**Backend:** new `documents.fields_edited_by_reviewer` boolean column,
+`POST /api/documents/{id}/fields` (`{"fields": [{"name","label","value","confidence"}, ...]}`,
+requires at least one field, replaces the fields list wholesale). 3 new
+tests (update/persist, empty-fields validation, 404) — 38/38 backend
+tests passing.
+
+**Verified live** via a real running server: uploaded a doc, corrected
+its `khata_no` field from an AI-misread `"88/C"` to `"213-CORRECTED"`
+through the actual HTTP API, confirmed via a fresh `GET` that both the
+new value and the `fields_edited_by_reviewer: true` flag persisted.
 
 ## Reject + Admin Blacklist Review
 

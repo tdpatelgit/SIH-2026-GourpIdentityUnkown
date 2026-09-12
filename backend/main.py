@@ -158,6 +158,30 @@ def approve_document(document_id: str):
     return doc
 
 
+class FieldUpdate(BaseModel):
+    name: str
+    label: str
+    value: str
+    confidence: float = 1.0  # manually corrected by a human reviewer — treat as high-confidence
+
+
+class UpdateFieldsPayload(BaseModel):
+    fields: List[FieldUpdate]
+
+
+@app.post("/api/documents/{document_id}/fields")
+def update_document_fields(document_id: str, payload: UpdateFieldsPayload):
+    """Let a reviewer manually correct AI-extracted field values instead
+    of only being able to approve-as-is or reject outright."""
+    if not payload.fields:
+        raise HTTPException(status_code=422, detail="at least one field is required")
+    fields = [f.model_dump() for f in payload.fields]
+    doc = db.update_fields(document_id, fields)
+    if not doc:
+        raise HTTPException(status_code=404, detail="document not found")
+    return doc
+
+
 class RejectPayload(BaseModel):
     reason: str
 

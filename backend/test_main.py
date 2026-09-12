@@ -15,6 +15,39 @@ def _upload(filename="khata_page_03.jpg", token=None):
     )
 
 
+def test_update_fields_replaces_ai_values():
+    upload = _upload("khata_page_edit.jpg")
+    doc_id = upload.json()["document_id"]
+    new_fields = [
+        {"name": "khata_no", "label": "Khata No.", "value": "999-CORRECTED", "confidence": 1.0},
+    ]
+    resp = client.post(f"/api/documents/{doc_id}/fields", json={"fields": new_fields})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["fields"] == new_fields
+    assert body["fields_edited_by_reviewer"] is True
+
+    # persisted — a fresh GET reflects the correction
+    refetched = client.get(f"/api/documents/{doc_id}")
+    assert refetched.json()["fields"] == new_fields
+    assert refetched.json()["fields_edited_by_reviewer"] is True
+
+
+def test_update_fields_requires_at_least_one_field():
+    upload = _upload("khata_page_edit2.jpg")
+    doc_id = upload.json()["document_id"]
+    resp = client.post(f"/api/documents/{doc_id}/fields", json={"fields": []})
+    assert resp.status_code == 422
+
+
+def test_update_fields_404_for_unknown_document():
+    resp = client.post(
+        "/api/documents/doc_does_not_exist/fields",
+        json={"fields": [{"name": "x", "label": "X", "value": "y", "confidence": 1.0}]},
+    )
+    assert resp.status_code == 404
+
+
 def test_analyze_returns_expected_shape():
     response = _upload()
     assert response.status_code == 200

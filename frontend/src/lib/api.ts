@@ -24,6 +24,7 @@ export interface AnalyzeResult {
   owner_username: string | null;
   plot_id: string | null;
   rejection_reason: string | null;
+  fields_edited_by_reviewer: boolean;
 }
 
 export interface BlacklistEntry {
@@ -179,7 +180,23 @@ export async function rejectDocument(documentId: string, reason: string): Promis
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.detail || "Reject failed");
+    throw new Error(body.detail || "Failed to reject document");
+  }
+  return response.json();
+}
+
+export async function updateDocumentFields(
+  documentId: string,
+  fields: ExtractedField[]
+): Promise<AnalyzeResult> {
+  const response = await fetch(`${API_BASE_URL}/api/documents/${documentId}/fields`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fields }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || "Failed to save field corrections");
   }
   return response.json();
 }

@@ -10,7 +10,9 @@ import {
   getGovernmentRecord,
   rejectDocument,
   saveBoundary,
+  updateDocumentFields,
   type AnalyzeResult,
+  type ExtractedField,
   type GovernmentRecord,
 } from "@/lib/api";
 import { PLOT_BBOXES } from "@/lib/plots";
@@ -32,6 +34,8 @@ export default function ReviewDocument() {
   const [govRecord, setGovRecord] = useState<GovernmentRecord | null>(null);
   const bgImageRef = useRef<HTMLImageElement | null>(null);
   const [bgLoaded, setBgLoaded] = useState(false);
+  const [editingFields, setEditingFields] = useState(false);
+  const [draftFields, setDraftFields] = useState<ExtractedField[]>([]);
 
   useEffect(() => {
     const img = new Image();
@@ -204,6 +208,41 @@ export default function ReviewDocument() {
     }
   }
 
+  function startEditingFields() {
+    if (!doc) return;
+    setDraftFields(doc.fields.map((f) => ({ ...f })));
+    setEditingFields(true);
+    setMessage(null);
+  }
+
+  function cancelEditingFields() {
+    setEditingFields(false);
+    setDraftFields([]);
+  }
+
+  function updateDraftFieldValue(index: number, value: string) {
+    setDraftFields((prev) =>
+      prev.map((f, i) => (i === index ? { ...f, value } : f))
+    );
+  }
+
+  async function handleSaveFieldCorrections() {
+    setBusy(true);
+    setMessage(null);
+    try {
+      // Manual corrections are treated as high-confidence (reviewer-verified).
+      const corrected = draftFields.map((f) => ({ ...f, confidence: 1.0 }));
+      const updated = await updateDocumentFields(params.id, corrected);
+      setDoc(updated);
+      setEditingFields(false);
+      setMessage("Field corrections saved.");
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Failed to save corrections.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!employee || !doc) return null;
 
   return (
@@ -360,20 +399,72 @@ export default function ReviewDocument() {
 
         <div className="col-span-2 space-y-4">
           <div className="bg-white rounded-2xl border border-slate-200 p-5">
-            <h2 className="font-semibold text-sm mb-3">Extracted fields</h2>
-            <table className="w-full text-sm">
-              <tbody>
-                {doc.fields.map((f) => (
-                  <tr key={f.name} className="border-t border-slate-100">
-                    <td className="py-2 text-slate-500 text-xs">{f.label}</td>
-                    <td className="py-2 font-medium text-xs">{f.value}</td>
-                    <td className="py-2 text-right text-xs font-bold">
-                      {Math.round(f.confidence * 100)}%
-                    </td>
-                  </tr>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-semibold text-sm">Extracted fields</h2>
+              {!editingFields ? (
+                <button
+                  onClick={startEditingFields}
+                  disabled={busy}
+                  className="text-xs font-semibold text-indigo-600 hover:underline disabled:opacity-40"
+                >
+                  ✎ Edit fields
+                </button>
+              ) : (
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleSaveFieldCorrections}
+                    disabled={busy}
+                    className="text-xs font-semibold text-emerald-600 hover:underline disabled:opacity-40"
+                  >
+                    Save corrections
+                  </button>
+                  <button
+                    onClick={cancelEditingFields}
+                    disabled={busy}
+                    className="text-xs font-semibold text-slate-400 hover:underline disabled:opacity-40"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+            {doc.fields_edited_by_reviewer && !editingFields && (
+              <p className="text-[10px] font-semibold text-indigo-600 bg-indigo-50 rounded px-2 py-1 mb-3 inline-block">
+                ✓ Manually corrected by reviewer
+              </p>
+            )}
+            {!editingFields ? (
+              <table className="w-full text-sm">
+                <tbody>
+                  {doc.fields.map((f) => (
+                    <tr key={f.name} className="border-t border-slate-100">
+                      <td className="py-2 text-slate-500 text-xs">{f.label}</td>
+                      <td className="py-2 font-medium text-xs">{f.value}</td>
+                      <td className="py-2 text-right text-xs font-bold">
+                        {Math.round(f.confidence * 100)}%
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="space-y-2">
+                {draftFields.map((f, i) => (
+                  <div key={f.name} className="flex items-center gap-2">
+                    <label className="text-xs text-slate-500 w-28 shrink-0">{f.label}</label>
+                    <input
+                      value={f.value}
+                      onChange={(e) => updateDraftFieldValue(i, e.target.value)}
+                      className="flex-1 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    />
+                  </div>
                 ))}
-              </tbody>
-            </table>
+                <p className="text-[11px] text-slate-400 pt-1">
+                  Correct any field the AI misread, then Save corrections —
+                  no need to reject the whole document for a small mistake.
+                </p>
+              </div>
+            )}
           </div>
 
           {govRecord && (
@@ -457,10 +548,10 @@ export default function ReviewDocument() {
               🚩 Flag for admin review
             </button>
             <p className="text-[11px] text-slate-400">
-              Approve if correct, Reject if the AI/upload is clearly wrong,
-              or Flag it to escalate for a separate admin decision without
-              rejecting outright. Use the boundary tool on the left to
-              hand-correct the parcel outline instead.
+              Approve if correct, Edit fields for small AI mistakes, Reject
+              if the AI/upload is clearly wrong, or Flag it to escalate for
+              a separate admin decision. Use the boundary tool on the left
+              to hand-correct the parcel outline.
             </p>
             {message && (
               <p className="text-xs font-semibold text-indigo-600 mt-3">{message}</p>

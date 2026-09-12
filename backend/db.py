@@ -49,6 +49,7 @@ class Document(Base):
     owner_username = Column(String, ForeignKey("users.username"), nullable=True)
     plot_id = Column(String, nullable=True)  # links to a dummy plot (1-4) for gov-record comparison
     rejection_reason = Column(Text, nullable=True)  # set when status == "rejected"
+    fields_edited_by_reviewer = Column(Boolean, nullable=False, default=False)
 
 
 class BlacklistEntry(Base):
@@ -145,6 +146,7 @@ def _row_to_dict(row: Document) -> dict:
         "owner_username": row.owner_username,
         "plot_id": row.plot_id,
         "rejection_reason": row.rejection_reason,
+        "fields_edited_by_reviewer": row.fields_edited_by_reviewer,
     }
 
 
@@ -240,6 +242,25 @@ def reject_document(document_id: str, reason: str) -> Optional[dict]:
             return None
         row.status = "rejected"
         row.rejection_reason = reason
+        db.commit()
+        db.refresh(row)
+        return _row_to_dict(row)
+    finally:
+        db.close()
+
+
+def update_fields(document_id: str, fields: list) -> Optional[dict]:
+    """Let a reviewer manually correct one or more AI-extracted field
+    values (e.g. when the AI misread text but a full reject is overkill).
+    Replaces the fields list wholesale and marks the document as having
+    been manually edited by a reviewer."""
+    db = get_session()
+    try:
+        row = db.query(Document).filter(Document.document_id == document_id).first()
+        if not row:
+            return None
+        row.fields_json = json.dumps(fields)
+        row.fields_edited_by_reviewer = True
         db.commit()
         db.refresh(row)
         return _row_to_dict(row)
