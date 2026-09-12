@@ -9,7 +9,8 @@ export type DocumentStatus =
   | "auto_approved"
   | "pending_review"
   | "approved"
-  | "boundary_drawn";
+  | "boundary_drawn"
+  | "rejected";
 
 export interface AnalyzeResult {
   document_id: string;
@@ -22,6 +23,19 @@ export interface AnalyzeResult {
   boundary: number[][] | null;
   owner_username: string | null;
   plot_id: string | null;
+  rejection_reason: string | null;
+}
+
+export interface BlacklistEntry {
+  id: string;
+  document_id: string;
+  reason: string;
+  flagged_by: string | null;
+  created_at: string;
+  resolved: boolean;
+  resolution: "dismissed" | "document_rejected" | null;
+  resolved_by: string | null;
+  resolved_at: string | null;
 }
 
 export interface GovernmentRecord {
@@ -45,8 +59,8 @@ export interface AuthResult {
 // localhost and when accessed over LAN from another device.
 const API_BASE_URL =
   typeof window !== "undefined"
-    ? `http://${window.location.hostname}:8000`
-    : "http://localhost:8000";
+    ? `http://${window.location.hostname}:8067`
+    : "http://localhost:8067";
 
 function authHeaders(): HeadersInit {
   if (typeof window === "undefined") return {};
@@ -154,5 +168,60 @@ export async function dummyUpload(plotId: number): Promise<AnalyzeResult> {
 export async function getGovernmentRecord(plotId: string | number): Promise<GovernmentRecord> {
   const response = await fetch(`${API_BASE_URL}/api/government-records/${plotId}`);
   if (!response.ok) throw new Error("Government record not found");
+  return response.json();
+}
+
+export async function rejectDocument(documentId: string, reason: string): Promise<AnalyzeResult> {
+  const response = await fetch(`${API_BASE_URL}/api/documents/${documentId}/reject`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || "Reject failed");
+  }
+  return response.json();
+}
+
+export async function blacklistDocument(
+  documentId: string,
+  reason: string,
+  flaggedBy?: string
+): Promise<BlacklistEntry> {
+  const response = await fetch(`${API_BASE_URL}/api/documents/${documentId}/blacklist`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason, flagged_by: flaggedBy }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || "Flag failed");
+  }
+  return response.json();
+}
+
+export async function listBlacklist(resolved?: boolean): Promise<BlacklistEntry[]> {
+  const qs = resolved !== undefined ? `?resolved=${resolved}` : "";
+  const response = await fetch(`${API_BASE_URL}/api/blacklist${qs}`);
+  if (!response.ok) throw new Error("Failed to list blacklist entries");
+  const body = await response.json();
+  return body.entries;
+}
+
+export async function resolveBlacklistEntry(
+  entryId: string,
+  resolution: "dismissed" | "document_rejected",
+  resolvedBy?: string
+): Promise<BlacklistEntry> {
+  const response = await fetch(`${API_BASE_URL}/api/blacklist/${entryId}/resolve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ resolution, resolved_by: resolvedBy }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || "Resolve failed");
+  }
   return response.json();
 }
