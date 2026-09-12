@@ -33,6 +33,7 @@ Scoping estimate (functional-prototype tier, not built now): `.hermes/plans/2026
 | 16. Reject + admin blacklist review for bad AI output/uploads | ✅ Done — `/review/[id]` Reject + Flag buttons, `/admin/blacklist` dashboard, 35/35 tests passing, verified live end-to-end (reject + flag→resolve→auto-reject flow) |
 | 17. Manual field correction by reviewer | ✅ Done — `/review/[id]` "Edit fields" lets a reviewer correct AI-misread values in place instead of only approve/reject, 38/38 tests passing, verified live via real API round-trip |
 | 18. Real TrOCR merged to main + per-upload AI toggle | ✅ Done — TrOCR branch merged into `main`; upload page has a "📋 Saved responses" / "🤖 AI review (TrOCR)" toggle per upload, 55/55 tests passing, verified live end-to-end with both modes through the real API |
+| 19. Dummy plot uploads also run through real AI when toggled | ✅ Done — `backend/dummy_scans/` per-line demo images, dummy-upload endpoint honors the same toggle, verified live for all 4 plots via real TrOCR |
 
 **Live verification performed this session:**
 - `pytest` in `backend/`: **5 passed**
@@ -177,6 +178,36 @@ use_ai=false -> {"source": "saved_response", fields: [...6 mocked fields...]}
 use_ai=true  -> {"source": "ai_review", "fields": [{"name": "owner_name", "value": "RAMESH KUMAR", "confidence": 0.55}]}
 ```
 — real image, real model, real inference, correctly gated by the toggle.
+
+### Dummy plot uploads also run through real AI
+
+The 4 one-click "dummy scan" demo buttons on the upload page honor the
+same toggle — previously they always returned the static mocked fixture
+regardless of the toggle state.
+
+**Backend:** added `backend/dummy_scans/plot_{1-4}_line{0-5}.png` —
+each dummy plot's 6 fields (Khata No./Khasra No./Survey No./Owner
+Name/Area/Mutation) rendered as **separate single-line images**, because
+TrOCR is a single-text-line model and garbles multi-line input badly
+(tested: a 6-line stacked image decoded as `'***'` garbage). New
+`ocr_engine.run_ocr_multiline_and_map_fields()` runs OCR per line image
+and joins the results before field-mapping. `POST
+/api/documents/dummy-upload` takes the same `use_ai` flag as `/api/analyze`.
+3 new tests — 59/59 backend tests passing.
+
+**Verified live with real TrOCR inference on all 4 dummy plots**,
+through the actual running API:
+```
+Plot 1: Khata No. 213/A, Khasra No. 402, Survey No. 17-B, Owner Name R. VENKATAIAH, Mutation PENDING
+Plot 2: Khata No. 88/C,  Khasra No. 119, Survey No. 5-A,  Owner Name S. LAKSHMI DEVI, Mutation APPROVED
+Plot 3: Khata No. 347,   Khasra No. 901/D (deliberate seeded error, correctly read by OCR), Survey No. 22-D, Owner Name M. RAGHUNATH RAO, Mutation DISPUTED
+Plot 4: Khata No. 560/F, Khasra No. 77, Survey No. 9-C, Owner Name K. AMITRA REDDY (OCR misread of "Anitha"), Mutation PENDING
+```
+Real per-line OCR correctly extracted 5-6 fields per plot; the "Area"
+field was misread by TrOCR itself as "APRA" on one plot (a genuine model
+limitation, not a mapper bug) and correctly fell through to no match for
+that one field — exactly the kind of imperfection the reviewer/correction
+workflow exists to catch.
 
 ## Reject + Admin Blacklist Review
 

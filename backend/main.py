@@ -1,4 +1,5 @@
 import asyncio
+import glob
 import os
 import random
 import threading
@@ -174,6 +175,10 @@ def get_document(document_id: str):
 
 class DummyUploadPayload(BaseModel):
     plot_id: int
+    use_ai: bool = False
+
+
+DUMMY_SCAN_DIR = os.path.join(os.path.dirname(__file__), "dummy_scans")
 
 
 @app.post("/api/documents/dummy-upload")
@@ -182,11 +187,55 @@ def dummy_upload(payload: DummyUploadPayload):
     if not fixture:
         raise HTTPException(status_code=404, detail="unknown plot_id — expected 1-4")
 
+    document_id = f"doc_{uuid.uuid4().hex[:8]}"
+
+    want_ai = payload.use_ai or ocr_engine.USE_REAL_OCR
+    if want_ai and ocr_engine.is_model_ready():
+        # Run real OCR on the actual generated scan for this plot instead
+        # of returning the static mocked fixture — same "AI review" path
+        # as a real upload. TrOCR is a single-line model, so the demo
+        # scan is pre-split into one image per field/line (plot_N_lineK.png);
+        # each line is OCR'd separately and the results combined, then
+        # mapped the same way as any other AI-review upload (baked-in
+        # text mirrors the mocked fixture, including plots 3/4's
+        # deliberately seeded errors, so results stay comparable).
+        line_paths = sorted(glob.glob(os.path.join(DUMMY_SCAN_DIR, f"plot_{payload.plot_id}_line*.png")))
+        if not line_paths:
+            raise HTTPException(status_code=500, detail=f"dummy scan images missing for plot {payload.plot_id}")
+        try:
+            line_bytes = []
+            for p in line_paths:
+                with open(p, "rb") as f:
+                    line_bytes.append(f.read())
+            fields = ocr_engine.run_ocr_multiline_and_map_fields(line_bytes)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"OCR failed: {exc}")
+
+        overall_confidence = (
+            sum(f["confidence"] for f in fields) / len(fields) if fields else 0.5
+        )
+        record = db.create_document(
+            document_id=document_id,
+            filename=f"dummy_plot_{payload.plot_id}.jpg",
+            fields=fields,
+            overall_confidence=round(overall_confidence, 2),
+            review_required=True,
+            status="pending_review",
+            plot_id=str(payload.plot_id),
+            source="ai_review",
+        )
+        return record
+
+    if want_ai and not ocr_engine.is_model_ready():
+        raise HTTPException(
+            status_code=503,
+            detail=f"AI review unavailable: {ocr_engine.get_load_error() or 'model not loaded'}",
+        )
+
     confidences = [f["confidence"] for f in fixture["fields"]]
     overall_confidence = round(sum(confidences) / len(confidences), 2)
     review_required = fixture["review_required"]
 
-    document_id = f"doc_{uuid.uuid4().hex[:8]}"
     record = db.create_document(
         document_id=document_id,
         filename=f"dummy_plot_{payload.plot_id}.jpg",
@@ -195,6 +244,7 @@ def dummy_upload(payload: DummyUploadPayload):
         review_required=review_required,
         status="pending_review" if review_required else "auto_approved",
         plot_id=str(payload.plot_id),
+        source="saved_response",
     )
     return record
 

@@ -171,13 +171,16 @@ export async function saveBoundary(
   return response.json();
 }
 
-export async function dummyUpload(plotId: number): Promise<AnalyzeResult> {
+export async function dummyUpload(plotId: number, useAi: boolean = false): Promise<AnalyzeResult> {
   const response = await fetch(`${API_BASE_URL}/api/documents/dummy-upload`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ plot_id: plotId }),
+    body: JSON.stringify({ plot_id: plotId, use_ai: useAi }),
   });
-  if (!response.ok) throw new Error("Dummy upload failed");
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || "Dummy upload failed");
+  }
   return response.json();
 }
 

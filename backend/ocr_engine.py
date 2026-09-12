@@ -89,3 +89,14 @@ def run_ocr_and_map_fields(image_bytes: bytes) -> List[MappedField]:
     mocked fixtures (list of {name, label, value, confidence})."""
     raw_text = run_ocr(image_bytes)
     return build_human_readable_fields(raw_text)
+
+
+def run_ocr_multiline_and_map_fields(line_image_bytes_list: List[bytes]) -> List[MappedField]:
+    """TrOCR is a single-text-line model — feeding it a multi-line scan
+    garbles everything. This runs OCR on each pre-cropped single-line
+    image separately, joins the decoded lines, and maps the combined
+    text into human-readable fields. Used for documents split into one
+    image per line/field (e.g. the demo dummy scans)."""
+    lines = [run_ocr(image_bytes) for image_bytes in line_image_bytes_list]
+    combined_text = "\n".join(lines)
+    return build_human_readable_fields(combined_text)

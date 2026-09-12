@@ -66,7 +66,7 @@ export default function Home() {
     setStatus("loading");
     setError(null);
     try {
-      const res = await dummyUpload(plotId);
+      const res = await dummyUpload(plotId, useAi);
       setResult(res);
       setStatus("done");
     } catch (e) {

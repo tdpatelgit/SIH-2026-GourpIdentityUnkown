@@ -72,3 +72,11 @@ def test_run_ocr_and_map_fields_falls_back_when_unmapped(monkeypatch):
     assert len(fields) == 1
     assert fields[0]["name"] == "raw_ocr_text"
     assert fields[0]["value"] == "gibberish"
+
+
+def test_run_ocr_multiline_joins_and_maps_lines(monkeypatch):
+    lines = iter(["Khata No: 213/A", "Owner Name: Test Person"])
+    monkeypatch.setattr(ocr_module, "run_ocr", lambda image_bytes: next(lines))
+    fields = ocr_module.run_ocr_multiline_and_map_fields([b"line1-bytes", b"line2-bytes"])
+    names = {f["name"] for f in fields}
+    assert names == {"khata_no", "owner_name"}
