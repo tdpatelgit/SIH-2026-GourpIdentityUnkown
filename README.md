@@ -35,6 +35,7 @@ Scoping estimate (functional-prototype tier, not built now): `.hermes/plans/2026
 | 18. Real TrOCR merged to main + per-upload AI toggle | ✅ Done — TrOCR branch merged into `main`; upload page has a "📋 Saved responses" / "🤖 AI review (TrOCR)" toggle per upload, 55/55 tests passing, verified live end-to-end with both modes through the real API |
 | 19. Dummy plot uploads also run through real AI when toggled | ✅ Done — `backend/dummy_scans/` per-line demo images, dummy-upload endpoint honors the same toggle, verified live for all 4 plots via real TrOCR |
 | 20. TrOCR accuracy improvements | ✅ Done — beam search + no-repeat-ngram decoding, 2x upscale, dropped harmful contrast normalization; field-extraction accuracy went from missing "Area" on every plot to 22/24 (92%) lines correct across all 4 dummy plots, verified live |
+| 21. Terminal processing logs | ✅ Done — every request/upload/AI-run/approve/reject/flag now logs to the terminal running the backend, with timing; verified live via real captured output |
 
 **Live verification performed this session:**
 - `pytest` in `backend/`: **5 passed**
@@ -238,9 +239,41 @@ are genuine model limitations on fine OCR distinctions (`APEA` vs `AREA`,
 correction workflow is designed to catch, not something further prompt
 engineering on a fixed base model can fully eliminate.
 
-## Reject + Admin Blacklist Review
+## Terminal Processing Logs
 
-Reviewers now have two additional options beyond Approve on any document's
+The backend now logs every meaningful event to whatever terminal is
+running `uvicorn` — no separate log viewer needed, just look at the
+terminal where you started the server.
+
+**What's logged, one line each:**
+- Every HTTP request: method, path, status code, timing (`GET /api/documents -> 200 (4ms)`)
+- Every upload: document ID, filename, which mode (AI review vs saved
+  response), owner
+- Real OCR runs: bytes processed, elapsed time, fields extracted (or the
+  exact error if OCR fails)
+- TrOCR model load: when it starts loading, how long it took, or the
+  exact failure reason
+- Every reviewer action: approve, reject (with reason), field correction
+  (with count), blacklist flag/resolve, boundary save
+
+**Format:** `HH:MM:SS | LEVEL | module | message` — e.g.
+```
+14:21:39 | INFO    | main | analyze: doc=doc_86f6be96 filename=log_test.jpg use_ai=False owner=anonymous
+14:21:41 | INFO    | main | analyze: doc=doc_86f6be96 saved-response fixture matched, overall_confidence=0.93 review_required=False
+14:21:41 | INFO    | main | POST /api/analyze -> 200 (1512ms)
+```
+
+**Verbosity control:** `LOG_LEVEL=DEBUG` (env var) additionally shows
+per-line raw OCR decode output before field-mapping — useful when
+debugging why a field didn't get extracted correctly. Default is `INFO`.
+
+New `backend/logging_config.py` centralizes the setup — every module
+calls `get_logger(__name__)` instead of `logging.getLogger` directly so
+format/level stay consistent everywhere. Verified live: ran a real
+upload and dummy-upload through the actual server and confirmed the
+exact log lines above appeared in the terminal.
+
+## Reject + Admin Blacklist Review
 review page (`/review/[id]`):
 
 - **✗ Reject** — sets `status: "rejected"` with a required, stored reason

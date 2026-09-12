@@ -1,6 +1,6 @@
 """Real OCR via TrOCR (microsoft/trocr-base-printed), gated behind USE_REAL_OCR.
 
-Given image bytes: preprocess (deskew/denoise/contrast via
+Given image bytes: preprocess (deskew/denoise/upscale via
 image_preprocessing.py) -> run TrOCR -> map the raw decoded text into
 human-readable fields (via ocr_field_mapper.py) shaped like the mocked
 fixtures, so the reviewer sees the same kind of field table either way.
@@ -10,9 +10,13 @@ loading ~1.3GB of weights on every request would make the demo unusable.
 """
 import io
 import os
+import time
 from typing import List, Optional
 
+from logging_config import get_logger
 from ocr_field_mapper import MappedField, build_human_readable_fields
+
+logger = get_logger(__name__)
 
 USE_REAL_OCR = os.getenv("USE_REAL_OCR", "false").lower() in ("1", "true", "yes")
 
@@ -25,14 +29,18 @@ def _lazy_load():
     global _processor, _model, _load_error
     if _processor is not None or _load_error is not None:
         return
+    logger.info("loading TrOCR model microsoft/trocr-base-printed (first use, may take a while)...")
+    start = time.monotonic()
     try:
         from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
         _processor = TrOCRProcessor.from_pretrained("microsoft/trocr-base-printed")
         _model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-base-printed")
         _model.eval()
+        logger.info("TrOCR model loaded in %.1fs", time.monotonic() - start)
     except Exception as exc:  # pragma: no cover - depends on network/model download
         _load_error = str(exc)
+        logger.error("TrOCR model failed to load: %s", exc)
 
 
 def is_available() -> bool:
@@ -73,6 +81,7 @@ def run_ocr(image_bytes: bytes) -> str:
 
     from image_preprocessing import preprocess_for_ocr
 
+    start = time.monotonic()
     preprocessed_bytes = preprocess_for_ocr(image_bytes)
     image = Image.open(io.BytesIO(preprocessed_bytes)).convert("RGB")
     pixel_values = _processor(images=image, return_tensors="pt").pixel_values
@@ -90,8 +99,9 @@ def run_ocr(image_bytes: bytes) -> str:
             early_stopping=True,
         )
 
-    text = _processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
-    return text.strip()
+    text = _processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
+    logger.debug("run_ocr: %.0fms -> %r", (time.monotonic() - start) * 1000, text)
+    return text
 
 
 def run_ocr_and_map_fields(image_bytes: bytes) -> List[MappedField]:

@@ -3,10 +3,11 @@ import glob
 import os
 import random
 import threading
+import time
 import uuid
 from typing import List, Optional
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Form
+from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -15,6 +16,9 @@ import government_records
 import ocr_engine
 from dummy_plot_fixtures import get_dummy_fixture
 from fixtures import pick_fixture
+from logging_config import get_logger
+
+logger = get_logger(__name__)
 
 app = FastAPI(title="Land Record Digitizer — Mock API")
 
@@ -26,15 +30,43 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Every request in, one line: method, path, status, timing. This is
+    the "processing log" you see scroll by in the terminal for every
+    upload/click, on top of the more detailed logs at each endpoint."""
+    start = time.monotonic()
+    response = await call_next(request)
+    duration_ms = (time.monotonic() - start) * 1000
+    logger.info(
+        "%s %s -> %d (%.0fms)",
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration_ms,
+    )
+    return response
+
+
 @app.on_event("startup")
 def on_startup():
     db.init_db()
+    logger.info("database initialized")
     # Preload the TrOCR model in the background if AI review might be
     # used, so the first per-upload "AI review" request isn't stuck
     # waiting ~30s+ for a cold model load. Best-effort — failures are
     # surfaced via /api/ocr-status, not raised at startup.
     if os.getenv("PRELOAD_TROCR", "false").lower() in ("1", "true", "yes"):
-        threading.Thread(target=ocr_engine.is_model_ready, daemon=True).start()
+        logger.info("PRELOAD_TROCR set — loading TrOCR model in background thread")
+
+        def _preload():
+            ready = ocr_engine.is_model_ready()
+            if ready:
+                logger.info("TrOCR model loaded and ready")
+            else:
+                logger.warning("TrOCR model failed to load: %s", ocr_engine.get_load_error())
+
+        threading.Thread(target=_preload, daemon=True).start()
 
 
 @app.get("/health")
@@ -81,6 +113,10 @@ async def analyze(
 ):
     owner_username = _resolve_owner(x_auth_token)
     document_id = f"doc_{uuid.uuid4().hex[:8]}"
+    logger.info(
+        "analyze: doc=%s filename=%s use_ai=%s owner=%s",
+        document_id, file.filename, use_ai, owner_username or "anonymous",
+    )
 
     # Per-upload toggle: the user explicitly chooses "AI review" (real
     # TrOCR) vs "Saved responses" (mocked, deterministic fixtures) on
@@ -93,10 +129,18 @@ async def analyze(
         # to a single "Raw OCR Text" field if nothing matched a known
         # label).
         image_bytes = await file.read()
+        logger.info("analyze: doc=%s running real TrOCR on %d bytes", document_id, len(image_bytes))
+        start = time.monotonic()
         try:
             fields = ocr_engine.run_ocr_and_map_fields(image_bytes)
         except Exception as exc:
+            logger.error("analyze: doc=%s OCR failed: %s", document_id, exc)
             raise HTTPException(status_code=500, detail=f"OCR failed: {exc}")
+        elapsed_ms = (time.monotonic() - start) * 1000
+        logger.info(
+            "analyze: doc=%s OCR done in %.0fms, %d field(s) extracted",
+            document_id, elapsed_ms, len(fields),
+        )
 
         overall_confidence = (
             sum(f["confidence"] for f in fields) / len(fields) if fields else 0.5
@@ -118,6 +162,7 @@ async def analyze(
         # User asked for AI review but the model isn't loaded/available —
         # fail loudly instead of silently falling back, so the toggle
         # behaves predictably.
+        logger.warning("analyze: doc=%s AI review requested but model unavailable: %s", document_id, ocr_engine.get_load_error())
         raise HTTPException(
             status_code=503,
             detail=f"AI review unavailable: {ocr_engine.get_load_error() or 'model not loaded'}",
@@ -130,6 +175,10 @@ async def analyze(
     confidences = [f["confidence"] for f in fixture["fields"]]
     overall_confidence = round(sum(confidences) / len(confidences), 2)
     review_required = fixture["review_required"]
+    logger.info(
+        "analyze: doc=%s saved-response fixture matched, overall_confidence=%.2f review_required=%s",
+        document_id, overall_confidence, review_required,
+    )
 
     record = db.create_document(
         document_id=document_id,
@@ -188,6 +237,7 @@ def dummy_upload(payload: DummyUploadPayload):
         raise HTTPException(status_code=404, detail="unknown plot_id — expected 1-4")
 
     document_id = f"doc_{uuid.uuid4().hex[:8]}"
+    logger.info("dummy_upload: doc=%s plot_id=%s use_ai=%s", document_id, payload.plot_id, payload.use_ai)
 
     want_ai = payload.use_ai or ocr_engine.USE_REAL_OCR
     if want_ai and ocr_engine.is_model_ready():
@@ -267,6 +317,7 @@ def approve_document(document_id: str):
     doc = db.update_status(document_id, "approved")
     if not doc:
         raise HTTPException(status_code=404, detail="document not found")
+    logger.info("approve: doc=%s approved by reviewer", document_id)
     return doc
 
 
@@ -291,6 +342,7 @@ def update_document_fields(document_id: str, payload: UpdateFieldsPayload):
     doc = db.update_fields(document_id, fields)
     if not doc:
         raise HTTPException(status_code=404, detail="document not found")
+    logger.info("update_fields: doc=%s reviewer corrected %d field(s)", document_id, len(fields))
     return doc
 
 
@@ -305,6 +357,7 @@ def reject_document(document_id: str, payload: RejectPayload):
     doc = db.reject_document(document_id, payload.reason.strip())
     if not doc:
         raise HTTPException(status_code=404, detail="document not found")
+    logger.info("reject: doc=%s rejected, reason=%r", document_id, payload.reason.strip())
     return doc
 
 
@@ -320,6 +373,7 @@ def blacklist_document(document_id: str, payload: BlacklistPayload):
     entry = db.create_blacklist_entry(document_id, payload.reason.strip(), payload.flagged_by)
     if not entry:
         raise HTTPException(status_code=404, detail="document not found")
+    logger.info("blacklist: doc=%s flagged by=%s reason=%r", document_id, payload.flagged_by, payload.reason.strip())
     return entry
 
 
@@ -342,6 +396,7 @@ def resolve_blacklist(entry_id: str, payload: ResolveBlacklistPayload):
         raise HTTPException(status_code=404, detail="blacklist entry not found")
     if payload.resolution == "document_rejected":
         db.reject_document(entry["document_id"], f"Rejected via blacklist review: {entry['reason']}")
+    logger.info("resolve_blacklist: entry=%s resolution=%s resolved_by=%s", entry_id, payload.resolution, payload.resolved_by)
     return entry
 
 
@@ -356,4 +411,5 @@ def save_boundary(document_id: str, payload: BoundaryPayload):
     doc = db.save_boundary(document_id, payload.points)
     if not doc:
         raise HTTPException(status_code=404, detail="document not found")
+    logger.info("save_boundary: doc=%s saved with %d point(s)", document_id, len(payload.points))
     return doc
