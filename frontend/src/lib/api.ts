@@ -25,6 +25,7 @@ export interface AnalyzeResult {
   plot_id: string | null;
   rejection_reason: string | null;
   fields_edited_by_reviewer: boolean;
+  source: "saved_response" | "ai_review";
 }
 
 export interface BlacklistEntry {
@@ -95,9 +96,10 @@ export async function login(username: string, password: string): Promise<AuthRes
   return response.json();
 }
 
-export async function analyzeDocument(file: File): Promise<AnalyzeResult> {
+export async function analyzeDocument(file: File, useAi: boolean = false): Promise<AnalyzeResult> {
   const formData = new FormData();
   formData.append("file", file);
+  formData.append("use_ai", useAi ? "true" : "false");
 
   const response = await fetch(`${API_BASE_URL}/api/analyze`, {
     method: "POST",
@@ -106,9 +108,22 @@ export async function analyzeDocument(file: File): Promise<AnalyzeResult> {
   });
 
   if (!response.ok) {
-    throw new Error("Analysis failed");
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || "Analysis failed");
   }
 
+  return response.json();
+}
+
+export interface OcrStatus {
+  use_real_ocr_flag: boolean;
+  model_available: boolean;
+  load_error: string | null;
+}
+
+export async function getOcrStatus(): Promise<OcrStatus> {
+  const response = await fetch(`${API_BASE_URL}/api/ocr-status`);
+  if (!response.ok) throw new Error("Failed to check AI review status");
   return response.json();
 }
 

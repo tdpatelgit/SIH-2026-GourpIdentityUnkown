@@ -32,6 +32,7 @@ Scoping estimate (functional-prototype tier, not built now): `.hermes/plans/2026
 | 15. Dummy upload for 4 plots + government-record comparison for AI-accuracy review | ✅ Done — one-click dummy uploads, side-by-side AI-vs-government comparison table on the review page, verified live (2 clean matches + 2 deliberate AI errors caught) |
 | 16. Reject + admin blacklist review for bad AI output/uploads | ✅ Done — `/review/[id]` Reject + Flag buttons, `/admin/blacklist` dashboard, 35/35 tests passing, verified live end-to-end (reject + flag→resolve→auto-reject flow) |
 | 17. Manual field correction by reviewer | ✅ Done — `/review/[id]` "Edit fields" lets a reviewer correct AI-misread values in place instead of only approve/reject, 38/38 tests passing, verified live via real API round-trip |
+| 18. Real TrOCR merged to main + per-upload AI toggle | ✅ Done — TrOCR branch merged into `main`; upload page has a "📋 Saved responses" / "🤖 AI review (TrOCR)" toggle per upload, 55/55 tests passing, verified live end-to-end with both modes through the real API |
 
 **Live verification performed this session:**
 - `pytest` in `backend/`: **5 passed**
@@ -139,6 +140,43 @@ tests passing.
 its `khata_no` field from an AI-misread `"88/C"` to `"213-CORRECTED"`
 through the actual HTTP API, confirmed via a fresh `GET` that both the
 new value and the `fields_edited_by_reviewer: true` flag persisted.
+
+## Real TrOCR Merged + Per-Upload AI Toggle
+
+The `feature/trocr-integration` branch (deskew/denoise/contrast
+preprocessing + human-readable field mapping — see
+`backend/TROCR_INTEGRATION.md` for the full history) is now merged into
+`main`. On top of that, the upload page (`/`) got a clear **per-upload
+toggle** instead of only a server-wide env flag:
+
+- **📋 Saved responses** (default) — deterministic mocked fixtures, fast,
+  reliable for a demo
+- **🤖 AI review (TrOCR)** — runs the real model on the actual uploaded
+  image, greyed out automatically if the model isn't loaded on this
+  server (checked via `GET /api/ocr-status` on page load)
+
+Every result now shows which path produced it (a small "🤖 AI review
+(TrOCR)" or "📋 Saved response" badge next to the status pill), and the
+document record stores a permanent `source` field so this is visible
+later during review too, not just at upload time.
+
+**Backend:** `POST /api/analyze` takes a new `use_ai` form field
+(defaults `false`); `ocr_engine.is_model_ready()` checks the model
+regardless of the `USE_REAL_OCR` env flag (that flag still exists as a
+server-wide default for teammates who want AI-first without touching the
+frontend); requesting AI review with no model loaded fails loudly with a
+503 instead of silently falling back. New `PRELOAD_TROCR=true` env var
+loads the model in a background thread at server startup so the first
+"AI review" request isn't stuck on a cold ~30s+ load. 4 new tests
+(`test_ai_toggle.py`) — 55/55 backend tests passing.
+
+**Verified live end-to-end**, same running server, same endpoint,
+switching only the `use_ai` flag:
+```
+use_ai=false -> {"source": "saved_response", fields: [...6 mocked fields...]}
+use_ai=true  -> {"source": "ai_review", "fields": [{"name": "owner_name", "value": "RAMESH KUMAR", "confidence": 0.55}]}
+```
+— real image, real model, real inference, correctly gated by the toggle.
 
 ## Reject + Admin Blacklist Review
 

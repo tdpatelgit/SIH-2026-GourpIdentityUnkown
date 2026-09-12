@@ -50,6 +50,7 @@ class Document(Base):
     plot_id = Column(String, nullable=True)  # links to a dummy plot (1-4) for gov-record comparison
     rejection_reason = Column(Text, nullable=True)  # set when status == "rejected"
     fields_edited_by_reviewer = Column(Boolean, nullable=False, default=False)
+    source = Column(String, nullable=False, default="saved_response")  # "saved_response" | "ai_review"
 
 
 class BlacklistEntry(Base):
@@ -147,6 +148,7 @@ def _row_to_dict(row: Document) -> dict:
         "plot_id": row.plot_id,
         "rejection_reason": row.rejection_reason,
         "fields_edited_by_reviewer": row.fields_edited_by_reviewer,
+        "source": row.source,
     }
 
 
@@ -159,6 +161,7 @@ def create_document(
     status: str,
     owner_username: Optional[str] = None,
     plot_id: Optional[str] = None,
+    source: str = "saved_response",
 ) -> dict:
     db = get_session()
     try:
@@ -173,6 +176,7 @@ def create_document(
             boundary_json=None,
             owner_username=owner_username,
             plot_id=plot_id,
+            source=source,
         )
         db.add(row)
         db.commit()

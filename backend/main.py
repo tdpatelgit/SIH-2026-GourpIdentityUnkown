@@ -1,5 +1,7 @@
 import asyncio
+import os
 import random
+import threading
 import uuid
 from typing import List, Optional
 
@@ -26,6 +28,12 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup():
     db.init_db()
+    # Preload the TrOCR model in the background if AI review might be
+    # used, so the first per-upload "AI review" request isn't stuck
+    # waiting ~30s+ for a cold model load. Best-effort — failures are
+    # surfaced via /api/ocr-status, not raised at startup.
+    if os.getenv("PRELOAD_TROCR", "false").lower() in ("1", "true", "yes"):
+        threading.Thread(target=ocr_engine.is_model_ready, daemon=True).start()
 
 
 @app.get("/health")
@@ -67,17 +75,22 @@ def _resolve_owner(x_auth_token: Optional[str]) -> Optional[str]:
 @app.post("/api/analyze")
 async def analyze(
     file: UploadFile = File(...),
+    use_ai: bool = Form(False),
     x_auth_token: Optional[str] = Header(None, alias="X-Auth-Token"),
 ):
     owner_username = _resolve_owner(x_auth_token)
     document_id = f"doc_{uuid.uuid4().hex[:8]}"
 
-    if ocr_engine.is_available():
-        # Real OCR path (USE_REAL_OCR=true + model loaded successfully).
-        # Image is deskewed/denoised/contrast-normalized before OCR, then
-        # the raw decoded text is mapped into the same human-readable
-        # field shape as the mocked fixtures (falls back to a single
-        # "Raw OCR Text" field if nothing matched a known label).
+    # Per-upload toggle: the user explicitly chooses "AI review" (real
+    # TrOCR) vs "Saved responses" (mocked, deterministic fixtures) on
+    # each upload, independent of the server-wide USE_REAL_OCR flag.
+    want_ai = use_ai or ocr_engine.USE_REAL_OCR
+    if want_ai and ocr_engine.is_model_ready():
+        # Real OCR path. Image is deskewed/denoised/contrast-normalized
+        # before OCR, then the raw decoded text is mapped into the same
+        # human-readable field shape as the mocked fixtures (falls back
+        # to a single "Raw OCR Text" field if nothing matched a known
+        # label).
         image_bytes = await file.read()
         try:
             fields = ocr_engine.run_ocr_and_map_fields(image_bytes)
@@ -96,8 +109,18 @@ async def analyze(
             review_required=review_required,
             status="pending_review",
             owner_username=owner_username,
+            source="ai_review",
         )
         return record
+
+    if want_ai and not ocr_engine.is_model_ready():
+        # User asked for AI review but the model isn't loaded/available —
+        # fail loudly instead of silently falling back, so the toggle
+        # behaves predictably.
+        raise HTTPException(
+            status_code=503,
+            detail=f"AI review unavailable: {ocr_engine.get_load_error() or 'model not loaded'}",
+        )
 
     # Mocked path (default) — deterministic fixture keyed by filename.
     await asyncio.sleep(random.uniform(1.2, 2.5))
@@ -115,6 +138,7 @@ async def analyze(
         review_required=review_required,
         status="pending_review" if review_required else "auto_approved",
         owner_username=owner_username,
+        source="saved_response",
     )
     return record
 
@@ -123,7 +147,7 @@ async def analyze(
 def ocr_status():
     return {
         "use_real_ocr_flag": ocr_engine.USE_REAL_OCR,
-        "model_available": ocr_engine.is_available(),
+        "model_available": ocr_engine.is_model_ready(),
         "load_error": ocr_engine.get_load_error(),
     }
 

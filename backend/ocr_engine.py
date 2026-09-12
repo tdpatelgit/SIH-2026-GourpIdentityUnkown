@@ -36,9 +36,20 @@ def _lazy_load():
 
 
 def is_available() -> bool:
-    """Whether real OCR is both enabled and its model has loaded successfully."""
+    """Whether real OCR is both enabled (USE_REAL_OCR env flag) and its
+    model has loaded successfully. Used for the server-wide default and
+    the /api/ocr-status diagnostic endpoint."""
     if not USE_REAL_OCR:
         return False
+    _lazy_load()
+    return _model is not None
+
+
+def is_model_ready() -> bool:
+    """Whether the TrOCR model has loaded successfully, ignoring the
+    USE_REAL_OCR env flag entirely — used for the per-upload AI-review
+    toggle, which lets a user request real OCR on demand regardless of
+    the server's default mode."""
     _lazy_load()
     return _model is not None
 

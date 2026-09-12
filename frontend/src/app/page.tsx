@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { analyzeDocument, dummyUpload, type AnalyzeResult } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
+import { analyzeDocument, dummyUpload, getOcrStatus, type AnalyzeResult } from "@/lib/api";
 import { useAuth } from "@/lib/useAuth";
 import Link from "next/link";
 
@@ -39,13 +39,21 @@ export default function Home() {
   const [status, setStatus] = useState<Status>("idle");
   const [result, setResult] = useState<AnalyzeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [useAi, setUseAi] = useState(false);
+  const [aiAvailable, setAiAvailable] = useState<boolean | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    getOcrStatus()
+      .then((s) => setAiAvailable(s.model_available))
+      .catch(() => setAiAvailable(false));
+  }, []);
 
   async function handleFile(file: File) {
     setStatus("loading");
     setError(null);
     try {
-      const res = await analyzeDocument(file);
+      const res = await analyzeDocument(file, useAi);
       setResult(res);
       setStatus("done");
     } catch (e) {
@@ -122,6 +130,41 @@ export default function Home() {
 
       <main className="mx-auto max-w-3xl px-6 py-10">
         {status !== "done" && (
+          <div className="mb-4 flex items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white p-3">
+            <span className="text-xs font-semibold text-slate-500">Extraction mode:</span>
+            <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setUseAi(false)}
+                disabled={status === "loading"}
+                className={`px-3 py-1.5 transition-colors ${
+                  !useAi ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                📋 Saved responses
+              </button>
+              <button
+                type="button"
+                onClick={() => setUseAi(true)}
+                disabled={status === "loading" || aiAvailable === false}
+                title={aiAvailable === false ? "AI model isn't loaded on this server right now" : undefined}
+                className={`px-3 py-1.5 transition-colors ${
+                  useAi ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"
+                } ${aiAvailable === false ? "opacity-40 cursor-not-allowed" : ""}`}
+              >
+                🤖 AI review (TrOCR)
+              </button>
+            </div>
+            {aiAvailable === false && (
+              <span className="text-[11px] text-slate-400">AI model unavailable — using saved responses</span>
+            )}
+            {aiAvailable === true && useAi && (
+              <span className="text-[11px] text-emerald-600 font-semibold">Real OCR ready</span>
+            )}
+          </div>
+        )}
+
+        {status !== "done" && (
           <div className="rounded-xl border-2 border-dashed border-slate-300 bg-white p-10 text-center">
             <input
               ref={inputRef}
@@ -193,7 +236,18 @@ export default function Home() {
         {status === "done" && result && (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
-              <StatusPill status={result.status} />
+              <div className="flex items-center gap-2">
+                <StatusPill status={result.status} />
+                <span
+                  className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${
+                    result.source === "ai_review"
+                      ? "bg-indigo-100 text-indigo-800"
+                      : "bg-slate-100 text-slate-600"
+                  }`}
+                >
+                  {result.source === "ai_review" ? "🤖 AI review (TrOCR)" : "📋 Saved response"}
+                </span>
+              </div>
               {result.status === "pending_review" && (
                 <p className="text-xs text-slate-500">
                   A government employee will review this record in the{" "}
