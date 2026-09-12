@@ -41,3 +41,9 @@ button:disabled,
 input:disabled {
   cursor: not-allowed;
 }
+
+input,
+textarea,
+select {
+  color: #091540;
+}
