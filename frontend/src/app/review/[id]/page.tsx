@@ -16,6 +16,7 @@ import {
   type GovernmentRecord,
 } from "@/lib/api";
 import { PLOT_BBOXES } from "@/lib/plots";
+import { useBfcacheGuard } from "@/lib/useBfcacheGuard";
 
 const CANVAS_W = 600;
 const CANVAS_H = 420;
@@ -24,6 +25,7 @@ export default function ReviewDocument() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  useBfcacheGuard();
 
   const [employee, setEmployee] = useState<string | null>(null);
   const [doc, setDoc] = useState<AnalyzeResult | null>(null);

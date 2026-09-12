@@ -4,12 +4,14 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { listBlacklist, resolveBlacklistEntry, type BlacklistEntry } from "@/lib/api";
+import { useBfcacheGuard } from "@/lib/useBfcacheGuard";
 
 // Admin blacklist review — shares the same mocked Gov Employee session as
 // /review (any employee ID/password works). A real deployment would gate
 // this behind a separate admin role; out of scope for this demo tier.
 export default function AdminBlacklist() {
   const router = useRouter();
+  useBfcacheGuard();
   const [employee, setEmployee] = useState<string | null>(null);
   const [entries, setEntries] = useState<BlacklistEntry[]>([]);
   const [showResolved, setShowResolved] = useState(false);

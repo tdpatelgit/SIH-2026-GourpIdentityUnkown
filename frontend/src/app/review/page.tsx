@@ -4,9 +4,11 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { listDocuments, type AnalyzeResult } from "@/lib/api";
+import { useBfcacheGuard } from "@/lib/useBfcacheGuard";
 
 export default function ReviewDashboard() {
   const router = useRouter();
+  useBfcacheGuard();
   const [employee, setEmployee] = useState<string | null>(null);
   const [docs, setDocs] = useState<AnalyzeResult[]>([]);
   const [loading, setLoading] = useState(true);

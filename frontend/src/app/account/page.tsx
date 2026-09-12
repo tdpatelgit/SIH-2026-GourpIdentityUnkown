@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { listDocuments, type AnalyzeResult } from "@/lib/api";
 import { useAuth } from "@/lib/useAuth";
+import { useBfcacheGuard } from "@/lib/useBfcacheGuard";
 
 function StatusPill({ status }: { status: AnalyzeResult["status"] }) {
   const map: Record<AnalyzeResult["status"], { label: string; cls: string }> = {
@@ -21,6 +22,7 @@ function StatusPill({ status }: { status: AnalyzeResult["status"] }) {
 export default function AccountDocuments() {
   const router = useRouter();
   const { username, ready, clearSession } = useAuth();
+  useBfcacheGuard();
   const [docs, setDocs] = useState<AnalyzeResult[]>([]);
   const [loading, setLoading] = useState(true);
 
