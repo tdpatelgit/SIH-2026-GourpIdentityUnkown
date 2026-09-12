@@ -29,7 +29,8 @@ Scoping estimate (functional-prototype tier, not built now): `.hermes/plans/2026
 | 12. Gov Employee Portal (login + review + approve/hand-draw boundary) | ✅ Done — `/review/login`, `/review`, `/review/[id]`, verified live end-to-end |
 | 13. SQLite persistence (replace in-memory store) | ✅ Done — `backend/db.py` (SQLAlchemy), 15/15 tests passing, verified data survives a real backend restart |
 | 14. Uploader accounts (signup/login, "My Documents") | ✅ Done — `/account/login`, `/account`, real password-hashed accounts in SQLite, 24/24 tests passing, verified live end-to-end |
-| 15. Dummy upload for 4 plots + official government records for AI-accuracy review | ✅ Done — one-click dummy uploads, side-by-side AI-vs-government comparison table on the review page, verified live (2 clean matches + 2 deliberate AI errors caught) |
+| 15. Dummy upload for 4 plots + government-record comparison for AI-accuracy review | ✅ Done — one-click dummy uploads, side-by-side AI-vs-government comparison table on the review page, verified live (2 clean matches + 2 deliberate AI errors caught) |
+| 16. Reject + admin blacklist review for bad AI output/uploads | ✅ Done — `/review/[id]` Reject + Flag buttons, `/admin/blacklist` dashboard, 35/35 tests passing, verified live end-to-end (reject + flag→resolve→auto-reject flow) |
 
 **Live verification performed this session:**
 - `pytest` in `backend/`: **5 passed**
@@ -113,6 +114,48 @@ both outcomes afterward.
 **Known limitation (mocked tier):** login is not real auth — any
 credentials work, session is just a `sessionStorage` flag with no
 server-side validation or token. Fine for a demo, not for production.
+
+## Reject + Admin Blacklist Review
+
+Reviewers now have two additional options beyond Approve on any document's
+review page (`/review/[id]`):
+
+- **✗ Reject** — sets `status: "rejected"` with a required, stored reason
+  (shown on the document afterward). Use when the AI output or the upload
+  itself is clearly wrong and doesn't need escalation.
+- **🚩 Flag for admin review** — creates a separate `blacklist_entries`
+  record (document stays in its current status, unaffected) for an admin
+  to decide independently, without the reviewer having to make the final
+  call themselves.
+
+**New admin surface:** `/admin/blacklist` — lists unresolved (or all, via
+checkbox) flags with the flagged reason, who flagged it, and when. Admin
+can **Reject document** (resolves the flag AND flips the linked document
+to `rejected`, with an audit-trail reason referencing the original flag)
+or **Dismiss flag** (resolves the flag, document status untouched — for
+flags raised in error). Linked from the Gov Employee Portal's header
+("🚩 Admin: Blacklist").
+
+**Backend additions** (`backend/db.py`, `backend/main.py`):
+- `documents.rejection_reason` column (nullable, set on reject)
+- New `blacklist_entries` table: `id`, `document_id`, `reason`,
+  `flagged_by`, `created_at`, `resolved`, `resolution`
+  (`"dismissed"` | `"document_rejected"`), `resolved_by`, `resolved_at`
+- `POST /api/documents/{id}/reject` (`{"reason": "..."}`, reason required)
+- `POST /api/documents/{id}/blacklist` (`{"reason": "...", "flagged_by": "..."}`)
+- `GET /api/blacklist` (optional `?resolved=true|false` filter)
+- `POST /api/blacklist/{id}/resolve` (`{"resolution": "dismissed"|"document_rejected", "resolved_by": "..."}`)
+  — resolving as `document_rejected` internally also calls the reject path
+- 35/35 backend tests passing (11 new: reject success/validation/404,
+  blacklist create/validation/404, list+filter, resolve both paths +
+  invalid-value + 404).
+
+**Verified live end-to-end** (real curl against a running server, not
+simulated): uploaded a doc → rejected it with a reason → confirmed
+`status: "rejected"` + reason persisted. Separately uploaded another doc →
+flagged it → confirmed it appeared in the unresolved blacklist list →
+resolved it as `document_rejected` → confirmed the linked document's
+status flipped to `rejected` automatically with an audit-trail reason.
 
 ## Database
 

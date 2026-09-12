@@ -158,6 +158,57 @@ def approve_document(document_id: str):
     return doc
 
 
+class RejectPayload(BaseModel):
+    reason: str
+
+
+@app.post("/api/documents/{document_id}/reject")
+def reject_document(document_id: str, payload: RejectPayload):
+    if not payload.reason.strip():
+        raise HTTPException(status_code=422, detail="a rejection reason is required")
+    doc = db.reject_document(document_id, payload.reason.strip())
+    if not doc:
+        raise HTTPException(status_code=404, detail="document not found")
+    return doc
+
+
+class BlacklistPayload(BaseModel):
+    reason: str
+    flagged_by: Optional[str] = None
+
+
+@app.post("/api/documents/{document_id}/blacklist")
+def blacklist_document(document_id: str, payload: BlacklistPayload):
+    if not payload.reason.strip():
+        raise HTTPException(status_code=422, detail="a reason is required to flag this document")
+    entry = db.create_blacklist_entry(document_id, payload.reason.strip(), payload.flagged_by)
+    if not entry:
+        raise HTTPException(status_code=404, detail="document not found")
+    return entry
+
+
+@app.get("/api/blacklist")
+def list_blacklist(resolved: Optional[bool] = None):
+    return {"entries": db.list_blacklist_entries(resolved=resolved)}
+
+
+class ResolveBlacklistPayload(BaseModel):
+    resolution: str  # "dismissed" | "document_rejected"
+    resolved_by: Optional[str] = None
+
+
+@app.post("/api/blacklist/{entry_id}/resolve")
+def resolve_blacklist(entry_id: str, payload: ResolveBlacklistPayload):
+    if payload.resolution not in ("dismissed", "document_rejected"):
+        raise HTTPException(status_code=422, detail="resolution must be 'dismissed' or 'document_rejected'")
+    entry = db.resolve_blacklist_entry(entry_id, payload.resolution, payload.resolved_by)
+    if not entry:
+        raise HTTPException(status_code=404, detail="blacklist entry not found")
+    if payload.resolution == "document_rejected":
+        db.reject_document(entry["document_id"], f"Rejected via blacklist review: {entry['reason']}")
+    return entry
+
+
 class BoundaryPayload(BaseModel):
     points: List[List[float]]
 

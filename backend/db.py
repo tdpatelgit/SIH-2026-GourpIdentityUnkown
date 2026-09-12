@@ -48,6 +48,24 @@ class Document(Base):
     boundary_json = Column(Text, nullable=True)  # JSON-encoded list[[x,y]] or null
     owner_username = Column(String, ForeignKey("users.username"), nullable=True)
     plot_id = Column(String, nullable=True)  # links to a dummy plot (1-4) for gov-record comparison
+    rejection_reason = Column(Text, nullable=True)  # set when status == "rejected"
+
+
+class BlacklistEntry(Base):
+    """A flag raised against a document (bad AI output or bad user upload)
+    for an admin to review separately from the normal reviewer queue."""
+
+    __tablename__ = "blacklist_entries"
+
+    id = Column(String, primary_key=True)
+    document_id = Column(String, ForeignKey("documents.document_id"), nullable=False)
+    reason = Column(Text, nullable=False)
+    flagged_by = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+    resolved = Column(Boolean, nullable=False, default=False)
+    resolution = Column(String, nullable=True)  # "dismissed" | "document_rejected"
+    resolved_by = Column(String, nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
 
 
 def init_db() -> None:
@@ -126,6 +144,7 @@ def _row_to_dict(row: Document) -> dict:
         "boundary": json.loads(row.boundary_json) if row.boundary_json else None,
         "owner_username": row.owner_username,
         "plot_id": row.plot_id,
+        "rejection_reason": row.rejection_reason,
     }
 
 
@@ -209,5 +228,87 @@ def save_boundary(document_id: str, points: list) -> Optional[dict]:
         db.commit()
         db.refresh(row)
         return _row_to_dict(row)
+    finally:
+        db.close()
+
+
+def reject_document(document_id: str, reason: str) -> Optional[dict]:
+    db = get_session()
+    try:
+        row = db.query(Document).filter(Document.document_id == document_id).first()
+        if not row:
+            return None
+        row.status = "rejected"
+        row.rejection_reason = reason
+        db.commit()
+        db.refresh(row)
+        return _row_to_dict(row)
+    finally:
+        db.close()
+
+
+# ---------- blacklist (flag a document's AI output or upload for admin review) ----------
+
+def _blacklist_entry_to_dict(row: BlacklistEntry) -> dict:
+    return {
+        "id": row.id,
+        "document_id": row.document_id,
+        "reason": row.reason,
+        "flagged_by": row.flagged_by,
+        "created_at": row.created_at.replace(tzinfo=timezone.utc).isoformat(),
+        "resolved": row.resolved,
+        "resolution": row.resolution,
+        "resolved_by": row.resolved_by,
+        "resolved_at": row.resolved_at.replace(tzinfo=timezone.utc).isoformat() if row.resolved_at else None,
+    }
+
+
+def create_blacklist_entry(document_id: str, reason: str, flagged_by: Optional[str] = None) -> Optional[dict]:
+    db = get_session()
+    try:
+        doc = db.query(Document).filter(Document.document_id == document_id).first()
+        if not doc:
+            return None
+        entry = BlacklistEntry(
+            id=f"flag_{secrets.token_hex(6)}",
+            document_id=document_id,
+            reason=reason,
+            flagged_by=flagged_by,
+            created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            resolved=False,
+        )
+        db.add(entry)
+        db.commit()
+        db.refresh(entry)
+        return _blacklist_entry_to_dict(entry)
+    finally:
+        db.close()
+
+
+def list_blacklist_entries(resolved: Optional[bool] = None) -> List[dict]:
+    db = get_session()
+    try:
+        query = db.query(BlacklistEntry)
+        if resolved is not None:
+            query = query.filter(BlacklistEntry.resolved == resolved)
+        rows = query.order_by(BlacklistEntry.created_at.desc()).all()
+        return [_blacklist_entry_to_dict(r) for r in rows]
+    finally:
+        db.close()
+
+
+def resolve_blacklist_entry(entry_id: str, resolution: str, resolved_by: Optional[str] = None) -> Optional[dict]:
+    db = get_session()
+    try:
+        row = db.query(BlacklistEntry).filter(BlacklistEntry.id == entry_id).first()
+        if not row:
+            return None
+        row.resolved = True
+        row.resolution = resolution
+        row.resolved_by = resolved_by
+        row.resolved_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        db.commit()
+        db.refresh(row)
+        return _blacklist_entry_to_dict(row)
     finally:
         db.close()

@@ -12,6 +12,7 @@ function StatusPill({ status }: { status: AnalyzeResult["status"] }) {
     pending_review: { label: "⏳ Pending review", cls: "bg-amber-100 text-amber-800" },
     approved: { label: "✓ Approved by reviewer", cls: "bg-emerald-100 text-emerald-800" },
     boundary_drawn: { label: "✎ Boundary drawn", cls: "bg-indigo-100 text-indigo-800" },
+    rejected: { label: "✗ Rejected", cls: "bg-rose-100 text-rose-800" },
   };
   const s = map[status];
   return <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${s.cls}`}>{s.label}</span>;

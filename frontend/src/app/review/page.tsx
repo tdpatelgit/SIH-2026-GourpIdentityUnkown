@@ -57,6 +57,9 @@ export default function ReviewDashboard() {
           <p className="text-xs text-slate-400">Signed in as {employee}</p>
         </div>
         <div className="flex gap-3">
+          <Link href="/admin/blacklist" className="text-sm text-slate-300 hover:text-white">
+            🚩 Admin: Blacklist
+          </Link>
           <Link href="/" className="text-sm text-slate-300 hover:text-white">
             ← Public site
           </Link>

@@ -114,3 +114,117 @@ def test_upload_with_token_sets_owner_and_mine_filters_correctly():
     mine_again = client.get("/api/documents", params={"mine": "true"}, headers={"X-Auth-Token": token})
     ids_again = [d["document_id"] for d in mine_again.json()["documents"]]
     assert other_id not in ids_again
+
+
+def test_reject_document_sets_status_and_reason():
+    upload = _upload("khata_page_33.jpg")
+    doc_id = upload.json()["document_id"]
+    response = client.post(f"/api/documents/{doc_id}/reject", json={"reason": "Owner name doesn't match records"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "rejected"
+    assert body["rejection_reason"] == "Owner name doesn't match records"
+
+
+def test_reject_document_requires_non_empty_reason():
+    upload = _upload("khata_page_22.jpg")
+    doc_id = upload.json()["document_id"]
+    response = client.post(f"/api/documents/{doc_id}/reject", json={"reason": "   "})
+    assert response.status_code == 422
+
+
+def test_reject_missing_document_returns_404():
+    response = client.post("/api/documents/doc_missing/reject", json={"reason": "bad data"})
+    assert response.status_code == 404
+
+
+def test_blacklist_document_creates_entry():
+    upload = _upload("khata_page_11.jpg")
+    doc_id = upload.json()["document_id"]
+    response = client.post(
+        f"/api/documents/{doc_id}/blacklist",
+        json={"reason": "AI extracted the wrong khasra number", "flagged_by": "LR-EMP-01"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["document_id"] == doc_id
+    assert body["reason"] == "AI extracted the wrong khasra number"
+    assert body["resolved"] is False
+
+
+def test_blacklist_document_requires_reason():
+    upload = _upload("khata_page_10.jpg")
+    doc_id = upload.json()["document_id"]
+    response = client.post(f"/api/documents/{doc_id}/blacklist", json={"reason": ""})
+    assert response.status_code == 422
+
+
+def test_blacklist_missing_document_returns_404():
+    response = client.post("/api/documents/doc_missing/blacklist", json={"reason": "bad data"})
+    assert response.status_code == 404
+
+
+def test_list_blacklist_includes_new_entry_and_filters_by_resolved():
+    upload = _upload("khata_page_09b.jpg")
+    doc_id = upload.json()["document_id"]
+    flag = client.post(f"/api/documents/{doc_id}/blacklist", json={"reason": "suspicious owner name"})
+    entry_id = flag.json()["id"]
+
+    unresolved = client.get("/api/blacklist", params={"resolved": "false"})
+    ids = [e["id"] for e in unresolved.json()["entries"]]
+    assert entry_id in ids
+
+    resolved = client.get("/api/blacklist", params={"resolved": "true"})
+    ids_resolved = [e["id"] for e in resolved.json()["entries"]]
+    assert entry_id not in ids_resolved
+
+
+def test_resolve_blacklist_dismissed_does_not_change_document_status():
+    upload = _upload("khata_page_08b.jpg")
+    doc_id = upload.json()["document_id"]
+    original_status = upload.json()["status"]
+    flag = client.post(f"/api/documents/{doc_id}/blacklist", json={"reason": "flagged in error"})
+    entry_id = flag.json()["id"]
+
+    response = client.post(
+        f"/api/blacklist/{entry_id}/resolve",
+        json={"resolution": "dismissed", "resolved_by": "admin1"},
+    )
+    assert response.status_code == 200
+    assert response.json()["resolved"] is True
+    assert response.json()["resolution"] == "dismissed"
+
+    doc = client.get(f"/api/documents/{doc_id}").json()
+    assert doc["status"] == original_status
+
+
+def test_resolve_blacklist_document_rejected_also_rejects_the_document():
+    upload = _upload("khata_page_07b.jpg")
+    doc_id = upload.json()["document_id"]
+    flag = client.post(f"/api/documents/{doc_id}/blacklist", json={"reason": "wrong survey number"})
+    entry_id = flag.json()["id"]
+
+    response = client.post(
+        f"/api/blacklist/{entry_id}/resolve",
+        json={"resolution": "document_rejected", "resolved_by": "admin1"},
+    )
+    assert response.status_code == 200
+
+    doc = client.get(f"/api/documents/{doc_id}").json()
+    assert doc["status"] == "rejected"
+    assert doc["rejection_reason"] is not None
+
+
+def test_resolve_blacklist_rejects_invalid_resolution_value():
+    upload = _upload("khata_page_06b.jpg")
+    doc_id = upload.json()["document_id"]
+    flag = client.post(f"/api/documents/{doc_id}/blacklist", json={"reason": "test"})
+    entry_id = flag.json()["id"]
+
+    response = client.post(f"/api/blacklist/{entry_id}/resolve", json={"resolution": "not_a_real_value"})
+    assert response.status_code == 422
+
+
+def test_resolve_missing_blacklist_entry_returns_404():
+    response = client.post("/api/blacklist/flag_missing/resolve", json={"resolution": "dismissed"})
+    assert response.status_code == 404

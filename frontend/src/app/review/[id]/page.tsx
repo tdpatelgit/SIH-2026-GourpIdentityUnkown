@@ -5,8 +5,10 @@ import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import {
   approveDocument,
+  blacklistDocument,
   getDocument,
   getGovernmentRecord,
+  rejectDocument,
   saveBoundary,
   type AnalyzeResult,
   type GovernmentRecord,
@@ -144,6 +146,42 @@ export default function ReviewDocument() {
       const updated = await approveDocument(params.id);
       setDoc(updated);
       setMessage("Approved as-is.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleReject() {
+    const reason = window.prompt(
+      "Why is this document being rejected? (shown on the record)"
+    );
+    if (!reason || !reason.trim()) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const updated = await rejectDocument(params.id, reason.trim());
+      setDoc(updated);
+      setMessage("Document rejected.");
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Reject failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleBlacklistFlag() {
+    const reason = window.prompt(
+      "Flag this document for admin review — what's wrong? " +
+        "(e.g. AI extracted the wrong field, or the upload itself looks fraudulent)"
+    );
+    if (!reason || !reason.trim()) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      await blacklistDocument(params.id, reason.trim(), employee ?? undefined);
+      setMessage("Flagged for admin review.");
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Flag failed.");
     } finally {
       setBusy(false);
     }
@@ -392,6 +430,11 @@ export default function ReviewDocument() {
               Current status:{" "}
               <span className="font-semibold text-slate-700">{doc.status}</span>
             </p>
+            {doc.status === "rejected" && doc.rejection_reason && (
+              <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs p-3 mb-3">
+                <span className="font-semibold">Rejected:</span> {doc.rejection_reason}
+              </div>
+            )}
             <button
               onClick={handleApprove}
               disabled={busy}
@@ -399,9 +442,25 @@ export default function ReviewDocument() {
             >
               ✓ Approve as-is
             </button>
+            <button
+              onClick={handleReject}
+              disabled={busy}
+              className="w-full bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold rounded-lg py-2.5 mb-2 disabled:opacity-40"
+            >
+              ✗ Reject
+            </button>
+            <button
+              onClick={handleBlacklistFlag}
+              disabled={busy}
+              className="w-full border border-amber-400 text-amber-700 hover:bg-amber-50 text-sm font-semibold rounded-lg py-2.5 mb-2 disabled:opacity-40"
+            >
+              🚩 Flag for admin review
+            </button>
             <p className="text-[11px] text-slate-400">
-              Or use the boundary tool on the left to hand-correct the parcel
-              outline instead of approving the auto-extracted result.
+              Approve if correct, Reject if the AI/upload is clearly wrong,
+              or Flag it to escalate for a separate admin decision without
+              rejecting outright. Use the boundary tool on the left to
+              hand-correct the parcel outline instead.
             </p>
             {message && (
               <p className="text-xs font-semibold text-indigo-600 mt-3">{message}</p>
