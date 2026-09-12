@@ -88,7 +88,7 @@ export default function Home() {
         <div className="mx-auto max-w-3xl px-6 py-5 flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold tracking-tight text-slate-900">
-              Intelligent Land Record Digitization
+              BhuLekh
             </h1>
             <p className="text-sm text-slate-500">
               Upload a Khata/Khasra page scan to extract structured fields with confidence scoring.
