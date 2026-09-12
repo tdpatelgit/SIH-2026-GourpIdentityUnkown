@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 import db
 import government_records
+import ocr_engine
 from dummy_plot_fixtures import get_dummy_fixture
 from fixtures import pick_fixture
 
@@ -68,6 +69,42 @@ async def analyze(
     file: UploadFile = File(...),
     x_auth_token: Optional[str] = Header(None, alias="X-Auth-Token"),
 ):
+    owner_username = _resolve_owner(x_auth_token)
+    document_id = f"doc_{uuid.uuid4().hex[:8]}"
+
+    if ocr_engine.is_available():
+        # Real OCR path (USE_REAL_OCR=true + model loaded successfully).
+        # TrOCR only recognizes raw text — it does NOT map text to specific
+        # fields (khata_no, owner_name, etc). Field-level NER extraction is
+        # explicitly out of scope for this integration; see README.
+        image_bytes = await file.read()
+        try:
+            raw_text = ocr_engine.run_ocr(image_bytes)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"OCR failed: {exc}")
+
+        fields = [
+            {
+                "name": "raw_ocr_text",
+                "label": "Raw OCR Text (unmapped)",
+                "value": raw_text or "(no text recognized)",
+                "confidence": 0.5,  # TrOCR doesn't expose a calibrated confidence; always flag for review
+            }
+        ]
+        overall_confidence = 0.5
+        review_required = True  # raw OCR output always needs human field-mapping/review
+        record = db.create_document(
+            document_id=document_id,
+            filename=file.filename,
+            fields=fields,
+            overall_confidence=overall_confidence,
+            review_required=review_required,
+            status="pending_review",
+            owner_username=owner_username,
+        )
+        return record
+
+    # Mocked path (default) — deterministic fixture keyed by filename.
     await asyncio.sleep(random.uniform(1.2, 2.5))
 
     fixture = pick_fixture(file.filename)
@@ -75,9 +112,6 @@ async def analyze(
     overall_confidence = round(sum(confidences) / len(confidences), 2)
     review_required = fixture["review_required"]
 
-    owner_username = _resolve_owner(x_auth_token)
-
-    document_id = f"doc_{uuid.uuid4().hex[:8]}"
     record = db.create_document(
         document_id=document_id,
         filename=file.filename,
@@ -88,6 +122,15 @@ async def analyze(
         owner_username=owner_username,
     )
     return record
+
+
+@app.get("/api/ocr-status")
+def ocr_status():
+    return {
+        "use_real_ocr_flag": ocr_engine.USE_REAL_OCR,
+        "model_available": ocr_engine.is_available(),
+        "load_error": ocr_engine.get_load_error(),
+    }
 
 
 @app.get("/api/documents")
