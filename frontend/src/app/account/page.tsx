@@ -32,17 +32,22 @@ export default function AccountDocuments() {
       router.push("/account/login");
       return;
     }
-    load();
+    load(true);
+    // Poll for status changes (e.g. a reviewer approving/rejecting a
+    // pending document) so the user sees updates without manually
+    // refreshing the page.
+    const interval = setInterval(() => load(false), 5000);
+    return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, username]);
 
-  async function load() {
-    setLoading(true);
+  async function load(showSpinner = false) {
+    if (showSpinner) setLoading(true);
     try {
       const mine = await listDocuments({ mine: true });
       setDocs(mine);
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   }
 
@@ -75,7 +80,7 @@ export default function AccountDocuments() {
           <h2 className="font-semibold text-slate-700">
             {docs.length} document{docs.length === 1 ? "" : "s"} uploaded
           </h2>
-          <button onClick={load} className="text-xs font-semibold text-indigo-600 hover:underline">
+          <button onClick={() => load(true)} className="text-xs font-semibold text-indigo-600 hover:underline">
             Refresh
           </button>
         </div>
@@ -96,20 +101,27 @@ export default function AccountDocuments() {
           {docs.map((d) => (
             <div
               key={d.document_id}
-              className="bg-white rounded-xl border border-slate-200 p-4 flex items-center justify-between"
+              className="bg-white rounded-xl border border-slate-200 p-4"
             >
-              <div>
-                <p className="font-semibold text-sm">{d.filename}</p>
-                <p className="text-xs text-slate-400">
-                  {d.document_id} &middot; {new Date(d.processed_at).toLocaleString()}
-                </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-semibold text-sm">{d.filename}</p>
+                  <p className="text-xs text-slate-400">
+                    {d.document_id} &middot; {new Date(d.processed_at).toLocaleString()}
+                  </p>
+                </div>
+                <div className="text-right space-y-1">
+                  <StatusPill status={d.status} />
+                  <p className="text-xs text-slate-400">
+                    {Math.round(d.overall_confidence * 100)}% confidence
+                  </p>
+                </div>
               </div>
-              <div className="text-right space-y-1">
-                <StatusPill status={d.status} />
-                <p className="text-xs text-slate-400">
-                  {Math.round(d.overall_confidence * 100)}% confidence
-                </p>
-              </div>
+              {d.status === "rejected" && d.rejection_reason && (
+                <div className="mt-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs p-3">
+                  <span className="font-semibold">Reason:</span> {d.rejection_reason}
+                </div>
+              )}
             </div>
           ))}
         </div>
